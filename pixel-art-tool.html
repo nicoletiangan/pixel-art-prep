@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>像素画前置处理工具</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 10px 20px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+header h1 { font-size: 15px; font-weight: 600; color: #e94560; }
+header span { font-size: 11px; color: #555; }
+
+.workspace { flex: 1; display: flex; overflow: hidden; }
+
+/* ── 左侧面板 ── */
+.panel {
+  width: 220px; min-width: 220px;
+  background: #16213e;
+  border-right: 1px solid #0f3460;
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+
+.section { padding: 14px 16px; border-bottom: 1px solid #0f3460; }
+.section-title {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: #e94560; margin-bottom: 10px;
+}
+
+.upload-zone {
+  border: 2px dashed #0f3460; border-radius: 8px;
+  padding: 20px 10px; text-align: center; cursor: pointer;
+  transition: all 0.2s; color: #555; font-size: 12px; line-height: 1.7;
+}
+.upload-zone:hover, .upload-zone.drag-over {
+  border-color: #e94560; background: rgba(233,69,96,0.06); color: #ccc;
+}
+.upload-zone .icon { font-size: 24px; display: block; margin-bottom: 6px; }
+#file-input { display: none; }
+.thumb { width: 100%; border-radius: 4px; margin-top: 10px; display: none; border: 1px solid #0f3460; }
+
+.control { margin-bottom: 12px; }
+.control:last-child { margin-bottom: 0; }
+.control label { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; color: #bbb; }
+.control label span { color: #e94560; font-weight: 700; }
+.control input[type=range] { width: 100%; accent-color: #e94560; cursor: pointer; }
+.control .hint { font-size: 10px; color: #555; margin-top: 3px; }
+
+.btn {
+  width: 100%; padding: 9px 0; border: none; border-radius: 6px;
+  cursor: pointer; font-size: 13px; font-weight: 600; transition: opacity 0.15s;
+}
+.btn:hover:not(:disabled) { opacity: 0.85; }
+.btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-primary { background: #e94560; color: #fff; }
+.btn-ghost { background: transparent; color: #666; border: 1px solid #0f3460; margin-top: 8px; font-size: 11px; }
+
+.tip { padding: 12px 16px; font-size: 11px; color: #555; line-height: 1.7; border-bottom: 1px solid #0f3460; }
+
+/* ── 右侧 ── */
+.preview-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.status-bar {
+  padding: 6px 16px; background: #16213e; border-bottom: 1px solid #0f3460;
+  font-size: 11px; color: #555; display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0; min-height: 28px;
+}
+.status-bar.busy { color: #e94560; }
+.spinner {
+  width: 10px; height: 10px; border: 2px solid #e94560;
+  border-top-color: transparent; border-radius: 50%;
+  animation: spin 0.5s linear infinite; display: none; flex-shrink: 0;
+}
+.status-bar.busy .spinner { display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress { height: 2px; background: #0f3460; flex-shrink: 0; }
+.progress-bar { height: 100%; background: #e94560; width: 0%; transition: width 0.3s; }
+
+.empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: #2a2a4a; gap: 10px; font-size: 13px;
+}
+.empty .big { font-size: 52px; }
+
+/* 2×2 网格 */
+.grid {
+  flex: 1; display: none;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px; background: #0a0a18; overflow: hidden;
+}
+
+.card { background: #0d0d1a; display: flex; flex-direction: column; overflow: hidden; }
+
+.card-header {
+  padding: 7px 12px; display: flex; align-items: center;
+  justify-content: space-between; flex-shrink: 0; border-bottom: 1px solid #0a0a18;
+}
+
+.style-badge { display: flex; align-items: center; gap: 8px; }
+.style-icon  { font-size: 16px; line-height: 1; }
+.style-name  { font-size: 13px; font-weight: 700; line-height: 1.2; }
+.style-desc  { font-size: 10px; color: #666; margin-top: 1px; }
+
+.card[data-style="realistic"] .card-header { background: #0f2a1a; }
+.card[data-style="realistic"] .style-name  { color: #5ecb7a; }
+.card[data-style="cartoon"]   .card-header { background: #1a1a2f; }
+.card[data-style="cartoon"]   .style-name  { color: #6b8cff; }
+.card[data-style="abstract"]  .card-header { background: #2a0f1a; }
+.card[data-style="abstract"]  .style-name  { color: #e94560; }
+.card[data-style="retro"]     .card-header { background: #2a1a0a; }
+.card[data-style="retro"]     .style-name  { color: #e0963a; }
+
+.card-dl {
+  padding: 4px 12px; background: rgba(255,255,255,0.05); border: 1px solid #1a1a3a;
+  border-radius: 4px; color: #888; font-size: 10px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.card-dl:hover:not(:disabled) { background: #e94560; border-color: #e94560; color: #fff; }
+.card-dl:disabled { opacity: 0.25; cursor: not-allowed; }
+
+.card-scroll {
+  flex: 1; overflow: auto;
+  display: flex; align-items: flex-start; justify-content: flex-start; padding: 8px;
+}
+.card canvas { max-width: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>像素画前置处理工具</h1>
+  <span>4种风格 · 选择最适合的版本导入像素画工具</span>
+</header>
+
+<div class="workspace">
+
+  <div class="panel">
+    <div class="section">
+      <div class="section-title">上传图片</div>
+      <div class="upload-zone" id="upload-zone">
+        <span class="icon">🖼️</span>
+        点击 / 拖拽 / Ctrl+V
+      </div>
+      <input type="file" id="file-input" accept="image/*">
+      <img id="thumb" class="thumb" alt="">
+    </div>
+
+    <div class="section">
+      <div class="section-title">色彩简化程度</div>
+      <div class="control">
+        <label>色阶数 <span id="lv">4</span></label>
+        <input type="range" id="levels" min="2" max="8" value="4">
+        <div class="hint">数字越小颜色越少、越粗犷</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <button class="btn btn-primary" id="run-btn" disabled>生成4种风格</button>
+      <button class="btn btn-ghost"   id="reset-btn">重新上传</button>
+    </div>
+
+    <div class="tip">
+      生成后将喜欢的风格下载，<br>
+      导入「画像素」等工具完成像素化。
+    </div>
+  </div>
+
+  <div class="preview-area">
+    <div class="status-bar" id="status">
+      <div class="spinner"></div>
+      <span id="status-text">等待上传图片…</span>
+    </div>
+    <div class="progress"><div class="progress-bar" id="prog"></div></div>
+
+    <div class="empty" id="empty">
+      <span class="big">🎨</span>
+      上传图片，生成4种风格预览
+    </div>
+
+    <div class="grid" id="grid">
+
+      <div class="card" data-style="realistic">
+        <div class="card-header">
+          <div class="style-badge">
+            <span class="style-icon">📷</span>
+            <div>
+              <div class="style-name">写实</div>
+              <div class="style-desc">保留原图色彩，轻度去噪</div>
+            </div>
+          </div>
+          <button class="card-dl" id="dl-realistic" disabled>下载</button>
+        </div>
+        <div class="card-scroll"><canvas id="cv-realistic"></canvas></div>
+      </div>
+
+      <div class="card" data-style="cartoon">
+        <div class="card-header">
+          <div class="style-badge">
+            <span class="style-icon">🎨</span>
+            <div>
+              <div class="style-name">卡通</div>
+              <div class="style-desc">平涂色块，鲜艳饱和</div>
+            </div>
+          </div>
+          <button class="card-dl" id="dl-cartoon" disabled>下载</button>
+        </div>
+        <div class="card-scroll"><canvas id="cv-cartoon"></canvas></div>
+      </div>
+
+      <div class="card" data-style="abstract">
+        <div class="card-header">
+          <div class="style-badge">
+            <span class="style-icon">🔺</span>
+            <div>
+              <div class="style-name">抽象</div>
+              <div class="style-desc">极简色彩，强烈对比</div>
+            </div>
+          </div>
+          <button class="card-dl" id="dl-abstract" disabled>下载</button>
+        </div>
+        <div class="card-scroll"><canvas id="cv-abstract"></canvas></div>
+      </div>
+
+      <div class="card" data-style="retro">
+        <div class="card-header">
+          <div class="style-badge">
+            <span class="style-icon">🕹️</span>
+            <div>
+              <div class="style-name">复古</div>
+              <div class="style-desc">暖色调，像素游戏感</div>
+            </div>
+          </div>
+          <button class="card-dl" id="dl-retro" disabled>下载</button>
+        </div>
+        <div class="card-scroll"><canvas id="cv-retro"></canvas></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const clamp = (v, lo=0, hi=255) => Math.min(hi, Math.max(lo, Math.round(v)));
+
+// ── 基础算法 ──────────────────────────────────
+
+function posterize(d, levels) {
+  levels = Math.max(2, Math.min(8, levels));
+  const step = 255 / (levels - 1);
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]   = clamp(Math.round(d[i]   / step) * step);
+    d[i+1] = clamp(Math.round(d[i+1] / step) * step);
+    d[i+2] = clamp(Math.round(d[i+2] / step) * step);
+  }
+}
+
+function gaussianBlur(d, w, h, radius) {
+  if (radius < 1) return;
+  const tmp = new Uint8ClampedArray(d.length);
+  function boxH(src, dst, r) {
+    const k = 1/(2*r+1);
+    for (let y=0; y<h; y++) {
+      for (let ch=0; ch<3; ch++) {
+        const row=y*w; let val=src[row*4+ch]*(r+1);
+        for (let x=0;x<r;x++) val+=src[(row+x)*4+ch];
+        for (let x=0;x<=r;x++) { val+=src[(row+Math.min(x+r,w-1))*4+ch]-src[row*4+ch]; dst[(row+x)*4+ch]=clamp(val*k); }
+        for (let x=r+1;x<w-r;x++) { val+=src[(row+x+r)*4+ch]-src[(row+x-r-1)*4+ch]; dst[(row+x)*4+ch]=clamp(val*k); }
+        for (let x=w-r;x<w;x++) { val+=src[(row+w-1)*4+ch]-src[(row+Math.max(x-r-1,0))*4+ch]; dst[(row+x)*4+ch]=clamp(val*k); }
+      }
+    }
+  }
+  function boxV(src, dst, r) {
+    const k=1/(2*r+1);
+    for (let x=0;x<w;x++) {
+      for (let ch=0;ch<3;ch++) {
+        let val=src[x*4+ch]*(r+1);
+        for (let y=0;y<r;y++) val+=src[(y*w+x)*4+ch];
+        for (let y=0;y<=r;y++) { val+=src[(Math.min(y+r,h-1)*w+x)*4+ch]-src[x*4+ch]; dst[(y*w+x)*4+ch]=clamp(val*k); }
+        for (let y=r+1;y<h-r;y++) { val+=src[((y+r)*w+x)*4+ch]-src[((y-r-1)*w+x)*4+ch]; dst[(y*w+x)*4+ch]=clamp(val*k); }
+        for (let y=h-r;y<h;y++) { val+=src[((h-1)*w+x)*4+ch]-src[(Math.max(y-r-1,0)*w+x)*4+ch]; dst[(y*w+x)*4+ch]=clamp(val*k); }
+      }
+    }
+  }
+  for (let p=0;p<3;p++) { boxH(d,tmp,radius); boxV(tmp,d,radius); }
+}
+
+function bilateralFilter(d, w, h, radius, sigmaColor) {
+  if (radius < 1) return;
+  const src=new Uint8ClampedArray(d);
+  const sc2=2*sigmaColor*sigmaColor, ss2=2*radius*radius;
+  const spW=[];
+  for (let dy=-radius;dy<=radius;dy++)
+    for (let dx=-radius;dx<=radius;dx++)
+      spW.push(Math.exp(-(dx*dx+dy*dy)/ss2));
+  for (let y=0;y<h;y++) {
+    for (let x=0;x<w;x++) {
+      const ci=(y*w+x)*4;
+      const cr=src[ci],cg=src[ci+1],cb=src[ci+2];
+      let sR=0,sG=0,sB=0,sW=0,ki=0;
+      for (let dy=-radius;dy<=radius;dy++) {
+        const ny=Math.min(Math.max(y+dy,0),h-1);
+        for (let dx=-radius;dx<=radius;dx++) {
+          const nx=Math.min(Math.max(x+dx,0),w-1);
+          const ni=(ny*w+nx)*4;
+          const nr=src[ni],ng=src[ni+1],nb=src[ni+2];
+          const w_=spW[ki++]*Math.exp(-((nr-cr)**2+(ng-cg)**2+(nb-cb)**2)/sc2);
+          sR+=nr*w_;sG+=ng*w_;sB+=nb*w_;sW+=w_;
+        }
+      }
+      d[ci]=clamp(sR/sW);d[ci+1]=clamp(sG/sW);d[ci+2]=clamp(sB/sW);
+    }
+  }
+}
+
+function adjustSaturation(d, factor) {
+  for (let i=0;i<d.length;i+=4) {
+    const r=d[i]/255,g=d[i+1]/255,b=d[i+2]/255;
+    const gray=0.299*r+0.587*g+0.114*b;
+    d[i]  =clamp((gray+(r-gray)*factor)*255);
+    d[i+1]=clamp((gray+(g-gray)*factor)*255);
+    d[i+2]=clamp((gray+(b-gray)*factor)*255);
+  }
+}
+
+function adjustContrast(d, factor) {
+  for (let i=0;i<d.length;i+=4) {
+    d[i]  =clamp(128+(d[i]  -128)*factor);
+    d[i+1]=clamp(128+(d[i+1]-128)*factor);
+    d[i+2]=clamp(128+(d[i+2]-128)*factor);
+  }
+}
+
+function warmShift(d) {
+  for (let i=0;i<d.length;i+=4) {
+    d[i]  =clamp(d[i]  *1.05);
+    d[i+2]=clamp(d[i+2]*0.92);
+  }
+}
+
+function posterizeHSV(d, hLevels, sLevels, vLevels) {
+  for (let i=0;i<d.length;i+=4) {
+    const r=d[i]/255, g=d[i+1]/255, b=d[i+2]/255;
+    const mx=Math.max(r,g,b), mn=Math.min(r,g,b), df=mx-mn;
+    let h=0, s=mx>0?df/mx:0, v=mx;
+    if (df>0) {
+      if (mx===r)      h=((g-b)/df%6+6)%6*60;
+      else if (mx===g) h=(b-r)/df*60+120;
+      else             h=(r-g)/df*60+240;
+    }
+    if (hLevels>1){const st=360/hLevels;h=Math.round(h/st)*st%360;}
+    if (sLevels>1){const st=1/(sLevels-1);s=Math.round(s/st)*st;}
+    if (vLevels>1){const st=1/(vLevels-1);v=Math.round(v/st)*st;}
+    const sec=Math.floor(h/60)%6, f=h/60-Math.floor(h/60);
+    const p=v*(1-s),q=v*(1-f*s),t=v*(1-(1-f)*s);
+    const rgb=[[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][sec];
+    d[i]=clamp(rgb[0]*255);d[i+1]=clamp(rgb[1]*255);d[i+2]=clamp(rgb[2]*255);
+  }
+}
+
+function pixelate(d, w, h, blockSize) {
+  for (let y=0;y<h;y+=blockSize) {
+    for (let x=0;x<w;x+=blockSize) {
+      let sR=0,sG=0,sB=0,cnt=0;
+      for (let by=y;by<Math.min(y+blockSize,h);by++)
+        for (let bx=x;bx<Math.min(x+blockSize,w);bx++) {
+          const i=(by*w+bx)*4; sR+=d[i];sG+=d[i+1];sB+=d[i+2];cnt++;
+        }
+      const aR=clamp(sR/cnt),aG=clamp(sG/cnt),aB=clamp(sB/cnt);
+      for (let by=y;by<Math.min(y+blockSize,h);by++)
+        for (let bx=x;bx<Math.min(x+blockSize,w);bx++) {
+          const i=(by*w+bx)*4; d[i]=aR;d[i+1]=aG;d[i+2]=aB;
+        }
+    }
+  }
+}
+
+function sobelEdgeMask(orig, w, h, threshold) {
+  const gray=new Float32Array(w*h);
+  for (let i=0;i<w*h;i++){const p=i*4;gray[i]=0.299*orig[p]+0.587*orig[p+1]+0.114*orig[p+2];}
+  const mask=new Uint8Array(w*h);
+  for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++) {
+    const gx=-gray[(y-1)*w+x-1]+gray[(y-1)*w+x+1]-2*gray[y*w+x-1]+2*gray[y*w+x+1]-gray[(y+1)*w+x-1]+gray[(y+1)*w+x+1];
+    const gy=-gray[(y-1)*w+x-1]-2*gray[(y-1)*w+x]-gray[(y-1)*w+x+1]+gray[(y+1)*w+x-1]+2*gray[(y+1)*w+x]+gray[(y+1)*w+x+1];
+    if (Math.sqrt(gx*gx+gy*gy)>threshold) mask[y*w+x]=1;
+  }
+  return mask;
+}
+
+function dilateEdgeMask(mask, w, h) {
+  const out=new Uint8Array(mask);
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++) {
+    if (!mask[y*w+x]) continue;
+    for (let dy=-1;dy<=1;dy++) for (let dx=-1;dx<=1;dx++) {
+      const ny=y+dy,nx=x+dx;
+      if (ny>=0&&ny<h&&nx>=0&&nx<w) out[ny*w+nx]=1;
+    }
+  }
+  return out;
+}
+
+function adaptiveOutline(d, w, h, mask, darken) {
+  for (let i=0;i<w*h;i++) if (mask[i]) {
+    const p=i*4;
+    d[p]=clamp(d[p]*darken);d[p+1]=clamp(d[p+1]*darken);d[p+2]=clamp(d[p+2]*darken);
+  }
+}
+
+// ── 4种风格定义 ───────────────────────────────
+
+const STYLES = [
+  {
+    id: 'realistic', name: '写实',
+    run(d, w, h, levels) {
+      bilateralFilter(d, w, h, 2, 25);
+      posterize(d, Math.min(8, levels + 2));
+    }
+  },
+  {
+    id: 'cartoon', name: '卡通',
+    run(d, w, h, levels) {
+      const orig = new Uint8ClampedArray(d);
+      bilateralFilter(d, w, h, 3, 50);
+      posterizeHSV(d, 12, 4, 6);
+      let mask = sobelEdgeMask(orig, w, h, 80);
+      mask = dilateEdgeMask(mask, w, h);
+      adaptiveOutline(d, w, h, mask, 0.35);
+    }
+  },
+  {
+    id: 'abstract', name: '抽象',
+    run(d, w, h, levels) {
+      gaussianBlur(d, w, h, 2);
+      pixelate(d, w, h, 30);
+      posterizeHSV(d, 8, 3, 4);
+    }
+  },
+  {
+    id: 'retro', name: '复古',
+    run(d, w, h, levels) {
+      gaussianBlur(d, w, h, 2);
+      warmShift(d);
+      posterizeHSV(d, 12, 4, 6);
+      adjustSaturation(d, 0.70);
+    }
+  }
+];
+
+// ── UI ───────────────────────────────────────
+
+let srcImageData = null;
+const $ = id => document.getElementById(id);
+
+function setStatus(msg, busy=false) {
+  $('status').className = 'status-bar'+(busy?' busy':'');
+  $('status-text').textContent = msg;
+}
+function setProgress(pct) { $('prog').style.width = pct+'%'; }
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width=img.naturalWidth; c.height=img.naturalHeight;
+      const ctx=c.getContext('2d');
+      ctx.imageSmoothingEnabled=false;
+      ctx.drawImage(img,0,0);
+      srcImageData=ctx.getImageData(0,0,c.width,c.height);
+      $('thumb').src=e.target.result; $('thumb').style.display='block';
+      STYLES.forEach(s=>{ $('cv-'+s.id).width=1; $('dl-'+s.id).disabled=true; });
+      $('empty').style.display='none';
+      $('grid').style.display='grid';
+      $('run-btn').disabled=false;
+      setStatus(`已加载：${img.naturalWidth} × ${img.naturalHeight}px`);
+      setProgress(0);
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function runAll() {
+  if (!srcImageData) return;
+  $('run-btn').disabled=true;
+  const levels=parseInt($('levels').value);
+  setProgress(0);
+  for (let i=0;i<STYLES.length;i++) {
+    const s=STYLES[i];
+    setStatus(`处理「${s.name}」风格…（${i+1} / ${STYLES.length}）`,true);
+    setProgress(i*25);
+    await new Promise(r=>setTimeout(r,30));
+    const data=new Uint8ClampedArray(srcImageData.data);
+    s.run(data,srcImageData.width,srcImageData.height,levels);
+    const cv=$('cv-'+s.id);
+    cv.width=srcImageData.width; cv.height=srcImageData.height;
+    const ctx=cv.getContext('2d');
+    ctx.imageSmoothingEnabled=false;
+    ctx.putImageData(new ImageData(data,cv.width,cv.height),0,0);
+    $('dl-'+s.id).disabled=false;
+  }
+  setProgress(100);
+  setStatus('完成 — 下载喜欢的风格，导入「画像素」对比效果。');
+  $('run-btn').disabled=false;
+}
+
+$('upload-zone').addEventListener('click',()=>$('file-input').click());
+$('file-input').addEventListener('change',e=>loadFile(e.target.files[0]));
+$('upload-zone').addEventListener('dragover',e=>{e.preventDefault();$('upload-zone').classList.add('drag-over');});
+$('upload-zone').addEventListener('dragleave',()=>$('upload-zone').classList.remove('drag-over'));
+$('upload-zone').addEventListener('drop',e=>{
+  e.preventDefault();$('upload-zone').classList.remove('drag-over');loadFile(e.dataTransfer.files[0]);
+});
+document.addEventListener('paste',e=>{
+  const item=[...e.clipboardData.items].find(i=>i.type.startsWith('image/'));
+  if(item) loadFile(item.getAsFile());
+});
+$('levels').addEventListener('input',()=>$('lv').textContent=$('levels').value);
+$('run-btn').addEventListener('click',runAll);
+$('reset-btn').addEventListener('click',()=>{
+  srcImageData=null;
+  $('thumb').style.display='none';
+  $('grid').style.display='none';
+  $('empty').style.display='flex';
+  $('run-btn').disabled=true;
+  $('file-input').value='';
+  setStatus('等待上传图片…');
+  setProgress(0);
+});
+STYLES.forEach(s=>$('dl-'+s.id).addEventListener('click',()=>{
+  const a=document.createElement('a');
+  a.download=s.name+'.png';
+  a.href=$('cv-'+s.id).toDataURL('image/png');
+  a.click();
+}));
+</script>
+</body>
+</html>
