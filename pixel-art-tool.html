@@ -75,7 +75,20 @@ header span { font-size: 11px; color: #555; }
 .btn-primary { background: #e94560; color: #fff; }
 .btn-ghost { background: transparent; color: #666; border: 1px solid #0f3460; margin-top: 8px; font-size: 11px; }
 
+/* 绘制/擦除切换 */
+.mode-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.btn-mode {
+  flex: 1; padding: 6px 0; border: 1px solid #0f3460; border-radius: 4px;
+  background: transparent; color: #666; font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+}
+.btn-mode.active { background: #e94560; border-color: #e94560; color: #fff; }
+
 .tip { padding: 12px 16px; font-size: 11px; color: #555; line-height: 1.7; border-bottom: 1px solid #0f3460; }
+
+/* 子面板默认隐藏 */
+#panel-stage1, #panel-draw, #panel-stage2 { display: none; }
+#tip-s1, #tip-s2 { display: none; }
 
 /* ── 右侧 ── */
 .preview-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -103,6 +116,19 @@ header span { font-size: 11px; color: #555; }
   color: #2a2a4a; gap: 10px; font-size: 13px;
 }
 .empty .big { font-size: 52px; }
+
+/* 阶段1画布光标 */
+#cv-stage1 { cursor: default; }
+#cv-stage1.drawing { cursor: crosshair; }
+
+/* 阶段1预览 */
+#stage1-view {
+  flex: 1; display: none;
+  overflow: auto; padding: 12px;
+  background: #0a0a18;
+  align-items: flex-start; justify-content: center;
+}
+#cv-stage1 { max-width: 100%; display: block; }
 
 /* 2×2 网格 */
 .grid {
@@ -157,7 +183,10 @@ header span { font-size: 11px; color: #555; }
 
 <div class="workspace">
 
+  <!-- ── 左侧面板 ── -->
   <div class="panel">
+
+    <!-- 上传（始终显示） -->
     <div class="section">
       <div class="section-title">上传图片</div>
       <div class="upload-zone" id="upload-zone">
@@ -168,26 +197,68 @@ header span { font-size: 11px; color: #555; }
       <img id="thumb" class="thumb" alt="">
     </div>
 
-    <div class="section">
-      <div class="section-title">色彩简化程度</div>
-      <div class="control">
-        <label>色阶数 <span id="lv">4</span></label>
-        <input type="range" id="levels" min="2" max="8" value="4">
-        <div class="hint">数字越小颜色越少、越粗犷</div>
+    <!-- 阶段1控件 -->
+    <div id="panel-stage1">
+      <div class="section">
+        <div class="section-title">边缘检测</div>
+        <div class="control">
+          <label>检测阈值 <span id="thr-val">50</span></label>
+          <input type="range" id="threshold" min="0" max="255" value="50">
+          <div class="hint">数值越小边缘越多</div>
+        </div>
+      </div>
+      <div class="section">
+        <button class="btn btn-primary" id="confirm-btn">确认轮廓</button>
+        <button class="btn btn-ghost"   id="draw-btn">手动描画</button>
+        <button class="btn btn-ghost"   id="skip-btn">跳过边缘检测</button>
       </div>
     </div>
 
-    <div class="section">
-      <button class="btn btn-primary" id="run-btn" disabled>生成4种风格</button>
-      <button class="btn btn-ghost"   id="reset-btn">重新上传</button>
+    <!-- 手动描画控件 -->
+    <div id="panel-draw">
+      <div class="section">
+        <div class="section-title">手动描画</div>
+        <div class="mode-row">
+          <button class="btn-mode active" id="mode-draw">绘制</button>
+          <button class="btn-mode"        id="mode-erase">擦除</button>
+        </div>
+        <div class="control">
+          <label>笔刷大小 <span id="brush-val">4</span>px</label>
+          <input type="range" id="brush-size" min="1" max="10" value="4">
+        </div>
+      </div>
+      <div class="section">
+        <button class="btn btn-primary" id="done-draw-btn">完成描画</button>
+        <button class="btn btn-ghost"   id="redetect-btn">重新检测</button>
+      </div>
     </div>
 
-    <div class="tip">
-      生成后将喜欢的风格下载，<br>
-      导入「画像素」等工具完成像素化。
+    <!-- 阶段2控件 -->
+    <div id="panel-stage2">
+      <div class="section">
+        <div class="section-title">色彩简化程度</div>
+        <div class="control">
+          <label>色阶数 <span id="lv">4</span></label>
+          <input type="range" id="levels" min="2" max="8" value="4">
+          <div class="hint">数字越小颜色越少、越粗犷</div>
+        </div>
+      </div>
+      <div class="section">
+        <button class="btn btn-ghost" id="readjust-btn">重新调整轮廓</button>
+        <button class="btn btn-ghost" id="reset-btn">重新上传</button>
+      </div>
     </div>
+
+    <div class="tip" id="tip-s1">
+      调整阈值让青色线条贴合主体轮廓，<br>也可手动修正后确认。
+    </div>
+    <div class="tip" id="tip-s2">
+      生成后将喜欢的风格下载，<br>导入「画像素」等工具完成像素化。
+    </div>
+
   </div>
 
+  <!-- ── 右侧预览区 ── -->
   <div class="preview-area">
     <div class="status-bar" id="status">
       <div class="spinner"></div>
@@ -195,11 +266,18 @@ header span { font-size: 11px; color: #555; }
     </div>
     <div class="progress"><div class="progress-bar" id="prog"></div></div>
 
+    <!-- 未上传状态 -->
     <div class="empty" id="empty">
       <span class="big">🎨</span>
       上传图片，生成4种风格预览
     </div>
 
+    <!-- 阶段1预览画布 -->
+    <div id="stage1-view">
+      <canvas id="cv-stage1"></canvas>
+    </div>
+
+    <!-- 阶段2：4种风格网格 -->
     <div class="grid" id="grid">
 
       <div class="card" data-style="realistic">
@@ -347,14 +425,6 @@ function adjustSaturation(d, factor) {
   }
 }
 
-function adjustContrast(d, factor) {
-  for (let i=0;i<d.length;i+=4) {
-    d[i]  =clamp(128+(d[i]  -128)*factor);
-    d[i+1]=clamp(128+(d[i+1]-128)*factor);
-    d[i+2]=clamp(128+(d[i+2]-128)*factor);
-  }
-}
-
 function warmShift(d) {
   for (let i=0;i<d.length;i+=4) {
     d[i]  =clamp(d[i]  *1.05);
@@ -445,7 +515,7 @@ const STYLES = [
     run(d, w, h, levels) {
       const orig = new Uint8ClampedArray(d);
       bilateralFilter(d, w, h, 3, 50);
-      posterizeHSV(d, 12, 4, 6);
+      posterizeHSV(d, 12, 4, levels + 2);
       let mask = sobelEdgeMask(orig, w, h, 80);
       mask = dilateEdgeMask(mask, w, h);
       adaptiveOutline(d, w, h, mask, 0.35);
@@ -456,7 +526,7 @@ const STYLES = [
     run(d, w, h, levels) {
       gaussianBlur(d, w, h, 2);
       pixelate(d, w, h, 30);
-      posterizeHSV(d, 8, 3, 4);
+      posterizeHSV(d, 8, 3, levels);
     }
   },
   {
@@ -464,22 +534,156 @@ const STYLES = [
     run(d, w, h, levels) {
       gaussianBlur(d, w, h, 2);
       warmShift(d);
-      posterizeHSV(d, 12, 4, 6);
+      posterizeHSV(d, 12, 4, levels + 2);
       adjustSaturation(d, 0.70);
     }
   }
 ];
 
-// ── UI ───────────────────────────────────────
+// ── 状态管理 ─────────────────────────────────
 
-let srcImageData = null;
+let appStage          = 'upload';  // 'upload' | 'stage1' | 'draw' | 'stage2'
+let srcImageData      = null;
+let currentEdgeMask   = null;      // 当前边缘掩码（含手动修改，未冻结）
+let confirmedEdgeMask = null;      // 冻结后的边缘掩码（Step 4 使用）
+let eraseMode         = false;     // 描画模式：绘制 or 擦除
+let isDrawing         = false;     // 是否正在描画
+let hasManualStrokes  = false;     // 是否有过手动描画
+let rafPending        = false;     // requestAnimationFrame 节流标志
+
 const $ = id => document.getElementById(id);
 
+function setStage(s) {
+  appStage = s;
+
+  // 子面板切换
+  $('panel-stage1').style.display = s === 'stage1'               ? 'block' : 'none';
+  $('panel-draw'  ).style.display = s === 'draw'                 ? 'block' : 'none';
+  $('panel-stage2').style.display = s === 'stage2'               ? 'block' : 'none';
+
+  // 提示文字
+  $('tip-s1').style.display = (s === 'stage1' || s === 'draw') ? 'block' : 'none';
+  $('tip-s2').style.display = s === 'stage2'                   ? 'block' : 'none';
+
+  // 右侧预览区切换
+  $('empty'      ).style.display = s === 'upload' ? 'flex'  : 'none';
+  $('stage1-view').style.display = (s === 'stage1' || s === 'draw') ? 'flex' : 'none';
+  $('grid'       ).style.display = s === 'stage2' ? 'grid'  : 'none';
+
+  // 画布描画光标
+  const cv1 = $('cv-stage1');
+  if (s === 'draw') cv1.classList.add('drawing');
+  else              cv1.classList.remove('drawing');
+
+  // 进入阶段1时刷新边缘叠加层
+  if (s === 'stage1' && srcImageData) drawEdgeOverlay();
+
+  // 进入阶段2时重置风格卡
+  if (s === 'stage2') {
+    STYLES.forEach(st => { $('cv-' + st.id).width = 1; $('dl-' + st.id).disabled = true; });
+    setProgress(0);
+  }
+
+  // 重新上传时彻底重置
+  if (s === 'upload') {
+    srcImageData      = null;
+    currentEdgeMask   = null;
+    confirmedEdgeMask = null;
+    hasManualStrokes  = false;
+    eraseMode         = false;
+    $('mode-draw').classList.add('active');
+    $('mode-erase').classList.remove('active');
+    $('thumb').style.display = 'none';
+    $('file-input').value    = '';
+    $('run-btn').disabled    = true;
+    setStatus('等待上传图片…');
+    setProgress(0);
+  }
+}
+
+// ── 边缘检测 & 叠加层 ────────────────────────
+
+function drawEdgeOverlay() {
+  if (!srcImageData) return;
+  const cv  = $('cv-stage1');
+  const w   = srcImageData.width;
+  const h   = srcImageData.height;
+  cv.width  = w;
+  cv.height = h;
+  const ctx = cv.getContext('2d');
+
+  // 画原图
+  ctx.putImageData(srcImageData, 0, 0);
+
+  if (!currentEdgeMask) return;
+
+  // 在边缘像素上叠加青色（利用离屏 canvas 保留透明度）
+  const off  = document.createElement('canvas');
+  off.width  = w; off.height = h;
+  const octx = off.getContext('2d');
+  const ov   = octx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    if (currentEdgeMask[i]) {
+      ov.data[i*4]   = 0;
+      ov.data[i*4+1] = 255;
+      ov.data[i*4+2] = 255;
+      ov.data[i*4+3] = 180;
+    }
+  }
+  octx.putImageData(ov, 0, 0);
+  ctx.drawImage(off, 0, 0);
+}
+
+function scheduleOverlayRedraw() {
+  if (!rafPending) {
+    rafPending = true;
+    requestAnimationFrame(() => { drawEdgeOverlay(); rafPending = false; });
+  }
+}
+
+// 将 canvas 事件坐标转换为图像像素坐标（处理 CSS 缩放）
+function getCanvasPos(cv, e) {
+  const rect = cv.getBoundingClientRect();
+  return {
+    x: Math.round((e.clientX - rect.left) * cv.width  / rect.width),
+    y: Math.round((e.clientY - rect.top)  * cv.height / rect.height)
+  };
+}
+
+// 在 currentEdgeMask 上用圆形笔刷绘制或擦除
+function paintBrush(x, y, value) {
+  if (!currentEdgeMask || !srcImageData) return;
+  const w = srcImageData.width, h = srcImageData.height;
+  const r = parseInt($('brush-size').value);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy <= r*r) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < w && ny >= 0 && ny < h)
+          currentEdgeMask[ny * w + nx] = value;
+      }
+    }
+  }
+  hasManualStrokes = true;
+  scheduleOverlayRedraw();
+}
+
+let thrDebounce = null;
+function runSobel(threshold) {
+  if (!srcImageData) return;
+  currentEdgeMask = sobelEdgeMask(srcImageData.data, srcImageData.width, srcImageData.height, threshold);
+  drawEdgeOverlay();
+}
+
+// ── 状态栏 ───────────────────────────────────
+
 function setStatus(msg, busy=false) {
-  $('status').className = 'status-bar'+(busy?' busy':'');
+  $('status').className = 'status-bar' + (busy ? ' busy' : '');
   $('status-text').textContent = msg;
 }
-function setProgress(pct) { $('prog').style.width = pct+'%'; }
+function setProgress(pct) { $('prog').style.width = pct + '%'; }
+
+// ── 图片加载 ─────────────────────────────────
 
 function loadFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
@@ -488,75 +692,149 @@ function loadFile(file) {
     const img = new Image();
     img.onload = () => {
       const c = document.createElement('canvas');
-      c.width=img.naturalWidth; c.height=img.naturalHeight;
-      const ctx=c.getContext('2d');
-      ctx.imageSmoothingEnabled=false;
-      ctx.drawImage(img,0,0);
-      srcImageData=ctx.getImageData(0,0,c.width,c.height);
-      $('thumb').src=e.target.result; $('thumb').style.display='block';
-      STYLES.forEach(s=>{ $('cv-'+s.id).width=1; $('dl-'+s.id).disabled=true; });
-      $('empty').style.display='none';
-      $('grid').style.display='grid';
-      $('run-btn').disabled=false;
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0);
+      srcImageData      = ctx.getImageData(0, 0, c.width, c.height);
+      currentEdgeMask   = null;
+      confirmedEdgeMask = null;
+      $('thumb').src           = e.target.result;
+      $('thumb').style.display = 'block';
       setStatus(`已加载：${img.naturalWidth} × ${img.naturalHeight}px`);
-      setProgress(0);
+      setStage('stage1');
+      runSobel(parseInt($('threshold').value));
     };
-    img.src=e.target.result;
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
+// ── 风格生成 ─────────────────────────────────
+
 async function runAll() {
   if (!srcImageData) return;
-  $('run-btn').disabled=true;
-  const levels=parseInt($('levels').value);
+  const levels = parseInt($('levels').value);
+  setStatus('处理中…', true);
   setProgress(0);
-  for (let i=0;i<STYLES.length;i++) {
-    const s=STYLES[i];
-    setStatus(`处理「${s.name}」风格…（${i+1} / ${STYLES.length}）`,true);
-    setProgress(i*25);
-    await new Promise(r=>setTimeout(r,30));
-    const data=new Uint8ClampedArray(srcImageData.data);
-    s.run(data,srcImageData.width,srcImageData.height,levels);
-    const cv=$('cv-'+s.id);
-    cv.width=srcImageData.width; cv.height=srcImageData.height;
-    const ctx=cv.getContext('2d');
-    ctx.imageSmoothingEnabled=false;
-    ctx.putImageData(new ImageData(data,cv.width,cv.height),0,0);
-    $('dl-'+s.id).disabled=false;
-  }
+
+  // 并行计算4种风格，计算完成后一次性渲染
+  const results = await Promise.all(STYLES.map(s =>
+    new Promise(resolve => setTimeout(() => {
+      const data = new Uint8ClampedArray(srcImageData.data);
+      s.run(data, srcImageData.width, srcImageData.height, levels);
+      resolve({ s, data });
+    }, 0))
+  ));
+
+  results.forEach(({ s, data }) => {
+    const cv = $('cv-' + s.id);
+    cv.width  = srcImageData.width;
+    cv.height = srcImageData.height;
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.putImageData(new ImageData(data, cv.width, cv.height), 0, 0);
+    $('dl-' + s.id).disabled = false;
+  });
+
   setProgress(100);
   setStatus('完成 — 下载喜欢的风格，导入「画像素」对比效果。');
-  $('run-btn').disabled=false;
 }
 
-$('upload-zone').addEventListener('click',()=>$('file-input').click());
-$('file-input').addEventListener('change',e=>loadFile(e.target.files[0]));
-$('upload-zone').addEventListener('dragover',e=>{e.preventDefault();$('upload-zone').classList.add('drag-over');});
-$('upload-zone').addEventListener('dragleave',()=>$('upload-zone').classList.remove('drag-over'));
-$('upload-zone').addEventListener('drop',e=>{
-  e.preventDefault();$('upload-zone').classList.remove('drag-over');loadFile(e.dataTransfer.files[0]);
+// ── 事件绑定 ─────────────────────────────────
+
+// 上传
+$('upload-zone').addEventListener('click',  () => $('file-input').click());
+$('file-input' ).addEventListener('change', e  => loadFile(e.target.files[0]));
+$('upload-zone').addEventListener('dragover',  e => { e.preventDefault(); $('upload-zone').classList.add('drag-over'); });
+$('upload-zone').addEventListener('dragleave', ()=> $('upload-zone').classList.remove('drag-over'));
+$('upload-zone').addEventListener('drop', e => {
+  e.preventDefault(); $('upload-zone').classList.remove('drag-over'); loadFile(e.dataTransfer.files[0]);
 });
-document.addEventListener('paste',e=>{
-  const item=[...e.clipboardData.items].find(i=>i.type.startsWith('image/'));
-  if(item) loadFile(item.getAsFile());
+document.addEventListener('paste', e => {
+  const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
+  if (item) loadFile(item.getAsFile());
 });
-$('levels').addEventListener('input',()=>$('lv').textContent=$('levels').value);
-$('run-btn').addEventListener('click',runAll);
-$('reset-btn').addEventListener('click',()=>{
-  srcImageData=null;
-  $('thumb').style.display='none';
-  $('grid').style.display='none';
-  $('empty').style.display='flex';
-  $('run-btn').disabled=true;
-  $('file-input').value='';
-  setStatus('等待上传图片…');
-  setProgress(0);
+
+// 阶段1按钮
+$('confirm-btn').addEventListener('click', () => {
+  confirmedEdgeMask = currentEdgeMask ? new Uint8Array(currentEdgeMask) : null;
+  setStage('stage2');
+  runAll();
 });
-STYLES.forEach(s=>$('dl-'+s.id).addEventListener('click',()=>{
-  const a=document.createElement('a');
-  a.download=s.name+'.png';
-  a.href=$('cv-'+s.id).toDataURL('image/png');
+$('skip-btn').addEventListener('click', () => {
+  confirmedEdgeMask = null;
+  setStage('stage2');
+  runAll();
+});
+$('draw-btn').addEventListener('click', () => setStage('draw'));
+
+// cv-stage1 描画事件
+const cv1 = $('cv-stage1');
+cv1.addEventListener('contextmenu', e => e.preventDefault());
+cv1.addEventListener('pointerdown', e => {
+  if (appStage !== 'draw') return;
+  e.preventDefault();
+  cv1.setPointerCapture(e.pointerId);
+  isDrawing = true;
+  const { x, y } = getCanvasPos(cv1, e);
+  paintBrush(x, y, e.button === 2 ? 0 : (eraseMode ? 0 : 1));
+});
+cv1.addEventListener('pointermove', e => {
+  if (!isDrawing || appStage !== 'draw') return;
+  e.preventDefault();
+  const { x, y } = getCanvasPos(cv1, e);
+  paintBrush(x, y, e.buttons === 2 ? 0 : (eraseMode ? 0 : 1));
+});
+cv1.addEventListener('pointerup',     () => { isDrawing = false; });
+cv1.addEventListener('pointercancel', () => { isDrawing = false; });
+
+// 手动描画按钮
+$('done-draw-btn').addEventListener('click', () => setStage('stage1'));
+$('redetect-btn').addEventListener('click', () => {
+  if (hasManualStrokes && !confirm('重新检测将清除手动描画的内容，确认继续？')) return;
+  hasManualStrokes = false;
+  runSobel(parseInt($('threshold').value));
+  setStage('stage1');
+});
+
+// 阶段2按钮
+$('readjust-btn').addEventListener('click', () => setStage('stage1'));
+$('reset-btn'    ).addEventListener('click', () => setStage('upload'));
+
+// 色阶滑块（改变后自动重新生成）
+$('levels').addEventListener('input', () => {
+  $('lv').textContent = $('levels').value;
+  if (appStage === 'stage2') runAll();
+});
+
+// 阈值滑块（150ms 防抖）
+$('threshold').addEventListener('input', () => {
+  $('thr-val').textContent = $('threshold').value;
+  clearTimeout(thrDebounce);
+  thrDebounce = setTimeout(() => runSobel(parseInt($('threshold').value)), 150);
+});
+
+// 描画模式切换
+$('mode-draw').addEventListener('click', () => {
+  eraseMode = false;
+  $('mode-draw').classList.add('active');
+  $('mode-erase').classList.remove('active');
+});
+$('mode-erase').addEventListener('click', () => {
+  eraseMode = true;
+  $('mode-erase').classList.add('active');
+  $('mode-draw').classList.remove('active');
+});
+
+// 笔刷大小滑块
+$('brush-size').addEventListener('input', () => $('brush-val').textContent = $('brush-size').value);
+
+// 下载按钮
+STYLES.forEach(s => $('dl-' + s.id).addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.download = s.name + '.png';
+  a.href = $('cv-' + s.id).toDataURL('image/png');
   a.click();
 }));
 </script>
