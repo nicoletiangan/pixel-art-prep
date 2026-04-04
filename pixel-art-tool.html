@@ -159,13 +159,40 @@ header span { font-size: 11px; color: #555; }
 .card[data-style="retro"]     .card-header { background: #2a1a0a; }
 .card[data-style="retro"]     .style-name  { color: #e0963a; }
 
-.card-dl {
-  padding: 4px 12px; background: rgba(255,255,255,0.05); border: 1px solid #1a1a3a;
+.card-actions { display: flex; gap: 6px; }
+.card-dl, .card-cp {
+  padding: 4px 10px; background: rgba(255,255,255,0.05); border: 1px solid #1a1a3a;
   border-radius: 4px; color: #888; font-size: 10px; font-weight: 600;
   cursor: pointer; transition: all 0.15s; white-space: nowrap;
 }
 .card-dl:hover:not(:disabled) { background: #e94560; border-color: #e94560; color: #fff; }
-.card-dl:disabled { opacity: 0.25; cursor: not-allowed; }
+.card-cp:hover:not(:disabled) { background: #0f3460; border-color: #6b8cff; color: #6b8cff; }
+.card-dl:disabled, .card-cp:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* 模态框 */
+#clipboard-modal {
+  position: fixed; inset: 0; z-index: 100;
+  display: none; align-items: center; justify-content: center;
+}
+.modal-backdrop {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.75);
+}
+.modal-box {
+  position: relative; z-index: 1; background: #16213e;
+  border: 1px solid #0f3460; border-radius: 10px;
+  padding: 20px; max-width: min(480px, 90vw);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.modal-box h3 { font-size: 13px; color: #e94560; }
+.modal-box p  { font-size: 11px; color: #888; line-height: 1.6; }
+.modal-box img { max-width: 100%; border-radius: 4px; border: 1px solid #0f3460; }
+.modal-close {
+  align-self: flex-end; padding: 6px 18px;
+  background: transparent; border: 1px solid #0f3460;
+  border-radius: 4px; color: #888; font-size: 11px;
+  cursor: pointer; transition: all 0.15s;
+}
+.modal-close:hover { border-color: #e94560; color: #e94560; }
 
 .card-scroll {
   flex: 1; overflow: auto;
@@ -289,7 +316,10 @@ header span { font-size: 11px; color: #555; }
               <div class="style-desc">保留原图色彩，轻度去噪</div>
             </div>
           </div>
-          <button class="card-dl" id="dl-realistic" disabled>下载</button>
+          <div class="card-actions">
+            <button class="card-dl" id="dl-realistic" disabled>下载</button>
+            <button class="card-cp" id="cp-realistic" disabled>复制</button>
+          </div>
         </div>
         <div class="card-scroll"><canvas id="cv-realistic"></canvas></div>
       </div>
@@ -303,7 +333,10 @@ header span { font-size: 11px; color: #555; }
               <div class="style-desc">平涂色块，鲜艳饱和</div>
             </div>
           </div>
-          <button class="card-dl" id="dl-cartoon" disabled>下载</button>
+          <div class="card-actions">
+            <button class="card-dl" id="dl-cartoon" disabled>下载</button>
+            <button class="card-cp" id="cp-cartoon" disabled>复制</button>
+          </div>
         </div>
         <div class="card-scroll"><canvas id="cv-cartoon"></canvas></div>
       </div>
@@ -317,7 +350,10 @@ header span { font-size: 11px; color: #555; }
               <div class="style-desc">极简色彩，强烈对比</div>
             </div>
           </div>
-          <button class="card-dl" id="dl-abstract" disabled>下载</button>
+          <div class="card-actions">
+            <button class="card-dl" id="dl-abstract" disabled>下载</button>
+            <button class="card-cp" id="cp-abstract" disabled>复制</button>
+          </div>
         </div>
         <div class="card-scroll"><canvas id="cv-abstract"></canvas></div>
       </div>
@@ -331,12 +367,26 @@ header span { font-size: 11px; color: #555; }
               <div class="style-desc">暖色调，像素游戏感</div>
             </div>
           </div>
-          <button class="card-dl" id="dl-retro" disabled>下载</button>
+          <div class="card-actions">
+            <button class="card-dl" id="dl-retro" disabled>下载</button>
+            <button class="card-cp" id="cp-retro" disabled>复制</button>
+          </div>
         </div>
         <div class="card-scroll"><canvas id="cv-retro"></canvas></div>
       </div>
 
     </div>
+  </div>
+</div>
+
+<!-- 剪贴板降级模态框 -->
+<div id="clipboard-modal">
+  <div class="modal-backdrop" id="modal-backdrop"></div>
+  <div class="modal-box">
+    <h3>复制图片</h3>
+    <p>浏览器不支持直接复制，请右键图片选择「复制图片」</p>
+    <img id="modal-img" alt="">
+    <button class="modal-close" id="modal-close">关闭</button>
   </div>
 </div>
 
@@ -387,7 +437,7 @@ function gaussianBlur(d, w, h, radius) {
   for (let p=0;p<3;p++) { boxH(d,tmp,radius); boxV(tmp,d,radius); }
 }
 
-function bilateralFilter(d, w, h, radius, sigmaColor) {
+function bilateralFilter(d, w, h, radius, sigmaColor, edgeMask=null) {
   if (radius < 1) return;
   const src=new Uint8ClampedArray(d);
   const sc2=2*sigmaColor*sigmaColor, ss2=2*radius*radius;
@@ -404,13 +454,16 @@ function bilateralFilter(d, w, h, radius, sigmaColor) {
         const ny=Math.min(Math.max(y+dy,0),h-1);
         for (let dx=-radius;dx<=radius;dx++) {
           const nx=Math.min(Math.max(x+dx,0),w-1);
+          ki++;
+          // 跳过边缘像素，不让平滑跨越轮廓
+          if (edgeMask && edgeMask[ny*w+nx]) continue;
           const ni=(ny*w+nx)*4;
           const nr=src[ni],ng=src[ni+1],nb=src[ni+2];
-          const w_=spW[ki++]*Math.exp(-((nr-cr)**2+(ng-cg)**2+(nb-cb)**2)/sc2);
+          const w_=spW[ki-1]*Math.exp(-((nr-cr)**2+(ng-cg)**2+(nb-cb)**2)/sc2);
           sR+=nr*w_;sG+=ng*w_;sB+=nb*w_;sW+=w_;
         }
       }
-      d[ci]=clamp(sR/sW);d[ci+1]=clamp(sG/sW);d[ci+2]=clamp(sB/sW);
+      if (sW > 0) { d[ci]=clamp(sR/sW);d[ci+1]=clamp(sG/sW);d[ci+2]=clamp(sB/sW); }
     }
   }
 }
@@ -505,16 +558,16 @@ function adaptiveOutline(d, w, h, mask, darken) {
 const STYLES = [
   {
     id: 'realistic', name: '写实',
-    run(d, w, h, levels) {
-      bilateralFilter(d, w, h, 2, 25);
+    run(d, w, h, levels, edgeMask) {
+      bilateralFilter(d, w, h, 2, 25, edgeMask);
       posterize(d, Math.min(8, levels + 2));
     }
   },
   {
     id: 'cartoon', name: '卡通',
-    run(d, w, h, levels) {
+    run(d, w, h, levels, edgeMask) {
       const orig = new Uint8ClampedArray(d);
-      bilateralFilter(d, w, h, 3, 50);
+      bilateralFilter(d, w, h, 3, 50, edgeMask);
       posterizeHSV(d, 12, 4, levels + 2);
       let mask = sobelEdgeMask(orig, w, h, 80);
       mask = dilateEdgeMask(mask, w, h);
@@ -523,7 +576,7 @@ const STYLES = [
   },
   {
     id: 'abstract', name: '抽象',
-    run(d, w, h, levels) {
+    run(d, w, h, levels, edgeMask) {
       gaussianBlur(d, w, h, 2);
       pixelate(d, w, h, 30);
       posterizeHSV(d, 8, 3, levels);
@@ -531,7 +584,7 @@ const STYLES = [
   },
   {
     id: 'retro', name: '复古',
-    run(d, w, h, levels) {
+    run(d, w, h, levels, edgeMask) {
       gaussianBlur(d, w, h, 2);
       warmShift(d);
       posterizeHSV(d, 12, 4, levels + 2);
@@ -580,7 +633,11 @@ function setStage(s) {
 
   // 进入阶段2时重置风格卡
   if (s === 'stage2') {
-    STYLES.forEach(st => { $('cv-' + st.id).width = 1; $('dl-' + st.id).disabled = true; });
+    STYLES.forEach(st => {
+      $('cv-' + st.id).width    = 1;
+      $('dl-' + st.id).disabled = true;
+      $('cp-' + st.id).disabled = true;
+    });
     setProgress(0);
   }
 
@@ -722,7 +779,7 @@ async function runAll() {
   const results = await Promise.all(STYLES.map(s =>
     new Promise(resolve => setTimeout(() => {
       const data = new Uint8ClampedArray(srcImageData.data);
-      s.run(data, srcImageData.width, srcImageData.height, levels);
+      s.run(data, srcImageData.width, srcImageData.height, levels, confirmedEdgeMask);
       resolve({ s, data });
     }, 0))
   ));
@@ -735,6 +792,7 @@ async function runAll() {
     ctx.imageSmoothingEnabled = false;
     ctx.putImageData(new ImageData(data, cv.width, cv.height), 0, 0);
     $('dl-' + s.id).disabled = false;
+    $('cp-' + s.id).disabled = false;
   });
 
   setProgress(100);
@@ -836,6 +894,29 @@ STYLES.forEach(s => $('dl-' + s.id).addEventListener('click', () => {
   a.download = s.name + '.png';
   a.href = $('cv-' + s.id).toDataURL('image/png');
   a.click();
+}));
+
+// 复制到剪贴板
+function showClipboardFallback(canvas) {
+  $('modal-img').src = canvas.toDataURL('image/png');
+  $('clipboard-modal').style.display = 'flex';
+}
+$('modal-close'   ).addEventListener('click', () => $('clipboard-modal').style.display = 'none');
+$('modal-backdrop').addEventListener('click', () => $('clipboard-modal').style.display = 'none');
+
+STYLES.forEach(s => $('cp-' + s.id).addEventListener('click', () => {
+  const canvas = $('cv-' + s.id);
+  canvas.toBlob(async blob => {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      const btn = $('cp-' + s.id);
+      const orig = btn.textContent;
+      btn.textContent = '已复制';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    } catch {
+      showClipboardFallback(canvas);
+    }
+  }, 'image/png');
 }));
 </script>
 </body>
