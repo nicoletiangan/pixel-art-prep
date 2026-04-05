@@ -749,7 +749,6 @@ function setStage(s) {
     $('mode-erase').classList.remove('active');
     $('thumb').style.display = 'none';
     $('file-input').value    = '';
-    $('run-btn').disabled    = true;
     setStatus('等待上传图片…');
     setProgress(0);
   }
@@ -850,6 +849,9 @@ function loadFile(file) {
       const ctx = c.getContext('2d');
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(img, 0, 0);
+      if (img.naturalWidth > 2000 || img.naturalHeight > 2000) {
+        setStatus(`⚠️ 图片较大（${img.naturalWidth}×${img.naturalHeight}px），处理时可能卡顿。建议缩小至 2000px 以内再上传。`);
+      }
       srcImageData      = ctx.getImageData(0, 0, c.width, c.height);
       currentEdgeMask   = null;
       confirmedEdgeMask = null;
