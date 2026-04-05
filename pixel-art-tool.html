@@ -120,8 +120,8 @@ header span { font-size: 11px; color: #555; }
 .empty .big { font-size: 52px; }
 
 /* 阶段1画布光标 */
-#cv-stage1 { cursor: default; touch-action: none; }
-#cv-stage1.drawing { cursor: crosshair; }
+#cv-stage1 { cursor: default; }
+#cv-stage1.drawing { cursor: crosshair; touch-action: none; }
 
 /* 阶段1预览 */
 #stage1-view {
@@ -221,51 +221,73 @@ header span { font-size: 11px; color: #555; }
 
 /* ── 移动端响应式（< 600px）── */
 @media (max-width: 599px) {
-  /* workspace 改为纵向 */
+  /* workspace 纵向排列 */
   .workspace { flex-direction: column; }
 
-  /* 面板置顶：横向滚动 */
+  /* 面板置顶：纵向紧凑布局，可上下滚动 */
   .panel {
     width: 100%; min-width: unset;
-    max-height: 42vh;
+    max-height: 44vh;
     border-right: none; border-bottom: 1px solid #0f3460;
-    flex-direction: row; flex-wrap: nowrap;
-    overflow-x: auto; overflow-y: hidden;
+    flex-direction: column;
+    overflow-y: auto; overflow-x: hidden;
     flex-shrink: 0;
   }
-  /* 面板内每个 section */
-  .panel > .section {
-    min-width: 180px; flex-shrink: 0;
-    border-bottom: none; border-right: 1px solid #0f3460;
-  }
-  /* 阶段子面板内的 section */
-  #panel-stage1 .section,
-  #panel-draw   .section,
-  #panel-stage2 .section {
-    min-width: 180px; flex-shrink: 0;
-    border-bottom: none; border-right: 1px solid #0f3460;
-  }
-  /* 子面板本身横向排列（JS 设为 block 时覆盖） */
-  #panel-stage1, #panel-draw, #panel-stage2 { flex-direction: row; }
-  #tip-s1, #tip-s2 {
-    min-width: 140px; flex-shrink: 0;
-    border-bottom: none; border-right: 1px solid #0f3460;
-  }
-  .thumb { max-height: 80px; width: auto; }
 
-  /* 触控友好按钮 */
-  .btn { padding: 11px 0; font-size: 14px; }
-  .btn-mode { padding: 10px 0; }
-  .card-dl, .card-cp { padding: 6px 10px; font-size: 11px; }
+  /* 所有 section 减少内边距 */
+  .section { padding: 10px 14px; }
+  .section-title { margin-bottom: 8px; }
+
+  /* 上传区：紧凑横排（图标+文字变小，缩略图靠右） */
+  #section-upload { display: flex; align-items: center; gap: 10px; padding: 8px 14px; }
+  #section-upload .section-title { display: none; }
+  .upload-zone {
+    flex: 1; padding: 8px 10px;
+    font-size: 11px; line-height: 1.4;
+  }
+  .upload-zone .icon { font-size: 16px; margin-bottom: 2px; }
+  .thumb { max-height: 52px; width: auto; margin-top: 0; flex-shrink: 0; }
+
+  /* 按钮区：横排显示，自动换行 */
+  #panel-stage1 .section:last-child,
+  #panel-draw   .section:last-child,
+  #panel-stage2 .section:last-child {
+    display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px;
+  }
+  #panel-stage1 .section:last-child .btn,
+  #panel-draw   .section:last-child .btn,
+  #panel-stage2 .section:last-child .btn {
+    flex: 1; min-width: calc(50% - 3px);
+    width: auto; margin-top: 0; padding: 10px 6px; font-size: 12px;
+  }
+
+  /* 绘制/擦除切换行 */
+  .mode-row { margin-bottom: 8px; }
+
+  /* tips 不在移动端显示（空间有限） */
+  #tip-s1, #tip-s2 { display: none !important; }
+
+  /* 触控友好 */
+  .card-dl, .card-cp { padding: 7px 10px; font-size: 11px; }
 
   /* 预览区占剩余空间 */
   .preview-area { flex: 1; min-height: 0; }
 
-  /* 阶段1画布：允许滚动查看大图 */
-  #stage1-view { align-items: flex-start; justify-content: flex-start; }
+  /* 阶段1画布：默认完整显示，点击后展开至全宽可滚动，双指捏合缩放 */
+  #stage1-view { align-items: flex-start; justify-content: flex-start; min-height: 0; touch-action: pan-y; }
+  #cv-stage1 { max-height: 100%; }
+  #cv-stage1.zoomed { max-height: none; }
 
   /* 阶段2：2×2 允许纵向滚动 */
   .grid { overflow-y: auto; overflow-x: hidden; }
+
+  /* 风格卡头部：隐藏描述文字，缩小内边距 */
+  .card-header { padding: 5px 8px; }
+  .style-desc  { display: none; }
+  .style-icon  { font-size: 13px; }
+  .style-name  { font-size: 12px; }
+  .card-actions { gap: 4px; }
+  .card-dl, .card-cp { padding: 4px 7px; font-size: 10px; }
 }
 </style>
 </head>
@@ -282,7 +304,7 @@ header span { font-size: 11px; color: #555; }
   <div class="panel">
 
     <!-- 上传（始终显示） -->
-    <div class="section">
+    <div class="section" id="section-upload">
       <div class="section-title">上传图片</div>
       <div class="upload-zone" id="upload-zone">
         <span class="icon">🖼️</span>
@@ -683,11 +705,10 @@ const $ = id => document.getElementById(id);
 function setStage(s) {
   appStage = s;
 
-  // 子面板切换（移动端用 flex，桌面用 block）
-  const panelDisplay = window.innerWidth < 600 ? 'flex' : 'block';
-  $('panel-stage1').style.display = s === 'stage1' ? panelDisplay : 'none';
-  $('panel-draw'  ).style.display = s === 'draw'   ? panelDisplay : 'none';
-  $('panel-stage2').style.display = s === 'stage2' ? panelDisplay : 'none';
+  // 子面板切换
+  $('panel-stage1').style.display = s === 'stage1' ? 'block' : 'none';
+  $('panel-draw'  ).style.display = s === 'draw'   ? 'block' : 'none';
+  $('panel-stage2').style.display = s === 'stage2' ? 'block' : 'none';
 
   // 提示文字
   $('tip-s1').style.display = (s === 'stage1' || s === 'draw') ? 'block' : 'none';
@@ -698,10 +719,11 @@ function setStage(s) {
   $('stage1-view').style.display = (s === 'stage1' || s === 'draw') ? 'flex' : 'none';
   $('grid'       ).style.display = s === 'stage2' ? 'grid'  : 'none';
 
-  // 画布描画光标
+  // 画布描画光标 & 重置缩放状态
   const cv1 = $('cv-stage1');
   if (s === 'draw') cv1.classList.add('drawing');
   else              cv1.classList.remove('drawing');
+  if (s !== 'stage1') { cv1.classList.remove('zoomed'); cv1.style.width = ''; cv1.style.height = ''; cv1.style.maxWidth = ''; }
 
   // 进入阶段1时刷新边缘叠加层
   if (s === 'stage1' && srcImageData) drawEdgeOverlay();
@@ -921,6 +943,35 @@ cv1.addEventListener('pointermove', e => {
 });
 cv1.addEventListener('pointerup',     () => { isDrawing = false; });
 cv1.addEventListener('pointercancel', () => { isDrawing = false; });
+cv1.addEventListener('click', () => {
+  if (appStage === 'stage1') {
+    const wasZoomed = cv1.classList.contains('zoomed');
+    cv1.classList.toggle('zoomed');
+    if (wasZoomed) { cv1.style.width = ''; cv1.style.height = ''; cv1.style.maxWidth = ''; }
+  }
+});
+
+// 捏合缩放（仅阶段1查看模式）
+let pinchStartDist = 0, pinchBaseWidth = 0;
+cv1.addEventListener('touchstart', e => {
+  if (appStage !== 'stage1' || e.touches.length !== 2) return;
+  e.preventDefault();
+  const t = e.touches;
+  pinchStartDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  pinchBaseWidth = cv1.getBoundingClientRect().width;
+}, { passive: false });
+cv1.addEventListener('touchmove', e => {
+  if (appStage !== 'stage1' || e.touches.length !== 2) return;
+  e.preventDefault();
+  const t = e.touches;
+  const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const minW = cv1.parentElement.clientWidth - 24;
+  const newW = Math.max(minW, Math.min(cv1.width, pinchBaseWidth * dist / pinchStartDist));
+  cv1.style.maxWidth = 'none';
+  cv1.style.width    = newW + 'px';
+  cv1.style.height   = (newW * cv1.height / cv1.width) + 'px';
+  cv1.classList.add('zoomed');
+}, { passive: false });
 
 // 手动描画按钮
 $('done-draw-btn').addEventListener('click', () => setStage('stage1'));
