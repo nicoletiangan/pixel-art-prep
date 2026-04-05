@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>像素画前置处理工具</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -13,8 +13,10 @@ body {
   font-family: 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 header {
@@ -118,7 +120,7 @@ header span { font-size: 11px; color: #555; }
 .empty .big { font-size: 52px; }
 
 /* 阶段1画布光标 */
-#cv-stage1 { cursor: default; }
+#cv-stage1 { cursor: default; touch-action: none; }
 #cv-stage1.drawing { cursor: crosshair; }
 
 /* 阶段1预览 */
@@ -169,6 +171,23 @@ header span { font-size: 11px; color: #555; }
 .card-cp:hover:not(:disabled) { background: #0f3460; border-color: #6b8cff; color: #6b8cff; }
 .card-dl:disabled, .card-cp:disabled { opacity: 0.25; cursor: not-allowed; }
 
+/* 图片放大预览遮罩 */
+#zoom-modal {
+  position: fixed; inset: 0; z-index: 60;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.88);
+}
+#zoom-modal img {
+  max-width: 95vw; max-height: 95vh;
+  display: block; image-rendering: pixelated;
+  border-radius: 4px;
+}
+#zoom-label {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.6); color: #e94560;
+  font-size: 12px; font-weight: 700; padding: 4px 14px; border-radius: 20px;
+}
+
 /* 模态框 */
 #clipboard-modal {
   position: fixed; inset: 0; z-index: 100;
@@ -199,6 +218,55 @@ header span { font-size: 11px; color: #555; }
   display: flex; align-items: flex-start; justify-content: flex-start; padding: 8px;
 }
 .card canvas { max-width: 100%; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* ── 移动端响应式（< 600px）── */
+@media (max-width: 599px) {
+  /* workspace 改为纵向 */
+  .workspace { flex-direction: column; }
+
+  /* 面板置顶：横向滚动 */
+  .panel {
+    width: 100%; min-width: unset;
+    max-height: 42vh;
+    border-right: none; border-bottom: 1px solid #0f3460;
+    flex-direction: row; flex-wrap: nowrap;
+    overflow-x: auto; overflow-y: hidden;
+    flex-shrink: 0;
+  }
+  /* 面板内每个 section */
+  .panel > .section {
+    min-width: 180px; flex-shrink: 0;
+    border-bottom: none; border-right: 1px solid #0f3460;
+  }
+  /* 阶段子面板内的 section */
+  #panel-stage1 .section,
+  #panel-draw   .section,
+  #panel-stage2 .section {
+    min-width: 180px; flex-shrink: 0;
+    border-bottom: none; border-right: 1px solid #0f3460;
+  }
+  /* 子面板本身横向排列（JS 设为 block 时覆盖） */
+  #panel-stage1, #panel-draw, #panel-stage2 { flex-direction: row; }
+  #tip-s1, #tip-s2 {
+    min-width: 140px; flex-shrink: 0;
+    border-bottom: none; border-right: 1px solid #0f3460;
+  }
+  .thumb { max-height: 80px; width: auto; }
+
+  /* 触控友好按钮 */
+  .btn { padding: 11px 0; font-size: 14px; }
+  .btn-mode { padding: 10px 0; }
+  .card-dl, .card-cp { padding: 6px 10px; font-size: 11px; }
+
+  /* 预览区占剩余空间 */
+  .preview-area { flex: 1; min-height: 0; }
+
+  /* 阶段1画布：允许滚动查看大图 */
+  #stage1-view { align-items: flex-start; justify-content: flex-start; }
+
+  /* 阶段2：2×2 允许纵向滚动 */
+  .grid { overflow-y: auto; overflow-x: hidden; }
+}
 </style>
 </head>
 <body>
@@ -379,12 +447,18 @@ header span { font-size: 11px; color: #555; }
   </div>
 </div>
 
+<!-- 图片放大预览 -->
+<div id="zoom-modal">
+  <span id="zoom-label"></span>
+  <img id="zoom-img" alt="">
+</div>
+
 <!-- 剪贴板降级模态框 -->
 <div id="clipboard-modal">
   <div class="modal-backdrop" id="modal-backdrop"></div>
   <div class="modal-box">
     <h3>复制图片</h3>
-    <p>浏览器不支持直接复制，请右键图片选择「复制图片」</p>
+    <p id="modal-hint">浏览器不支持直接复制，请右键图片选择「复制图片」</p>
     <img id="modal-img" alt="">
     <button class="modal-close" id="modal-close">关闭</button>
   </div>
@@ -609,10 +683,11 @@ const $ = id => document.getElementById(id);
 function setStage(s) {
   appStage = s;
 
-  // 子面板切换
-  $('panel-stage1').style.display = s === 'stage1'               ? 'block' : 'none';
-  $('panel-draw'  ).style.display = s === 'draw'                 ? 'block' : 'none';
-  $('panel-stage2').style.display = s === 'stage2'               ? 'block' : 'none';
+  // 子面板切换（移动端用 flex，桌面用 block）
+  const panelDisplay = window.innerWidth < 600 ? 'flex' : 'block';
+  $('panel-stage1').style.display = s === 'stage1' ? panelDisplay : 'none';
+  $('panel-draw'  ).style.display = s === 'draw'   ? panelDisplay : 'none';
+  $('panel-stage2').style.display = s === 'stage2' ? panelDisplay : 'none';
 
   // 提示文字
   $('tip-s1').style.display = (s === 'stage1' || s === 'draw') ? 'block' : 'none';
@@ -888,17 +963,59 @@ $('mode-erase').addEventListener('click', () => {
 // 笔刷大小滑块
 $('brush-size').addEventListener('input', () => $('brush-val').textContent = $('brush-size').value);
 
+// ── 图片放大预览 ─────────────────────────────
+STYLES.forEach(s => {
+  const scroll = document.querySelector(`.card[data-style="${s.id}"] .card-scroll`);
+  scroll.addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    const cv = $('cv-' + s.id);
+    if (cv.width <= 1) return;
+    $('zoom-img').src   = cv.toDataURL('image/png');
+    $('zoom-label').textContent = s.name;
+    $('zoom-modal').style.display = 'flex';
+  });
+});
+$('zoom-modal').addEventListener('click', () => {
+  $('zoom-modal').style.display = 'none';
+  $('zoom-img').src = '';
+});
+
 // 下载按钮
+function downloadCanvas(canvas, filename) {
+  if (isIOS) {
+    // iOS Safari 不支持 <a download>，改为模态框提示长按保存
+    $('modal-img').src = canvas.toDataURL('image/png');
+    $('modal-hint').textContent = '长按上方图片，选择「存储图像」保存到相册';
+    $('clipboard-modal').style.display = 'flex';
+    return;
+  }
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  }, 'image/png');
+}
+
 STYLES.forEach(s => $('dl-' + s.id).addEventListener('click', () => {
-  const a = document.createElement('a');
-  a.download = s.name + '.png';
-  a.href = $('cv-' + s.id).toDataURL('image/png');
-  a.click();
+  downloadCanvas($('cv-' + s.id), s.name + '.png');
 }));
+
+// 平台检测
+const isIOS    = /iPad|iPhone|iPod/i.test(navigator.userAgent) && !window.MSStream;
+const isMobile = isIOS || /Android|Mobi/i.test(navigator.userAgent);
 
 // 复制到剪贴板
 function showClipboardFallback(canvas) {
   $('modal-img').src = canvas.toDataURL('image/png');
+  const hint = isIOS
+    ? '长按上方图片，选择「存储图像」或「复制」'
+    : isMobile
+      ? '长按上方图片，选择「复制图片」'
+      : '右键点击上方图片，选择「复制图片」';
+  $('modal-hint').textContent = hint;
   $('clipboard-modal').style.display = 'flex';
 }
 $('modal-close'   ).addEventListener('click', () => $('clipboard-modal').style.display = 'none');
